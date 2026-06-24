@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>電子翻頁書</title>
+    <style>
+        :root {
+            --book-height: 600px;
+            --page-width: 450px;
+            --book-width: 900px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { background-color: #1c1e24; color: #e3e6eb; font-family: sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; align-items: center; }
+        .header-bar { width: 100%; padding: 20px; text-align: center; z-index: 10; }
+        .header-bar h1 { font-size: 16pt; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .viewport { position: relative; width: 100%; height: calc(100vh - 140px); display: flex; justify-content: center; align-items: center; perspective: 2500px; }
+        .book-container { position: relative; transition: transform 0.2s ease; }
+        .book { position: relative; width: var(--book-width); height: var(--book-height); transform-style: preserve-3d; transition: transform 0.6s ease; }
+        .sheet { position: absolute; top: 0; left: 50%; width: var(--page-width); height: 100%; transform-origin: left center; transform-style: preserve-3d; transition: transform 0.7s cubic-bezier(0.25, 1, 0.5, 1); z-index: 1; }
+        .page { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backface-visibility: hidden; background-color: #fcfaf2; overflow: hidden; box-shadow: inset 0 0 35px rgba(0,0,0,0.05); }
+        .page.front { z-index: 2; border-radius: 0 6px 6px 0; }
+        .page.back { transform: rotateY(180deg); z-index: 1; border-radius: 6px 0 0 6px; }
+        .page img { width: 100%; height: 100%; object-fit: contain; background: #fcfaf2; }
+        .sheet.flipped { transform: rotateY(-180deg); }
+        .controls-container { width: 100%; padding: 20px; display: flex; justify-content: center; z-index: 10; }
+        .controls { background: rgba(28, 30, 36, 0.9); border: 1px solid rgba(255,255,255,0.1); padding: 8px 24px; border-radius: 30px; display: flex; align-items: center; gap: 15px; }
+        .btn { background: transparent; border: none; color: #a0a7b5; cursor: pointer; padding: 6px; display: flex; align-items: center; transition: color 0.2s; }
+        .btn:hover { color: #ffffff; }
+        .btn svg { width: 20px; height: 20px; fill: currentColor; }
+        .page-indicator { font-size: 11pt; color: #ffffff; min-width: 80px; text-align: center; }
+        .click-zone { position: absolute; top: 0; width: 25%; height: 100%; cursor: pointer; z-index: 5; }
+        .click-zone.left { left: 0; }
+        .click-zone.right { right: 0; }
+    </style>
+</head>
+<body>
+    <div class="header-bar"><h1 id="bookTitle">掌握預「旗」--內文</h1></div>
+    <div class="viewport">
+        <div class="click-zone left" onclick="prev()"></div>
+        <div class="click-zone right" onclick="next()"></div>
+        <div class="book-container" id="bookContainer">
+            <div class="book" id="book"></div>
+        </div>
+    </div>
+    <div class="controls-container">
+        <div class="controls">
+            <button class="btn" onclick="jumpToPage(0)"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></button>
+            <button class="btn" onclick="prev()"><svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+            <div class="page-indicator" id="pageIndicator">0 / 0</div>
+            <button class="btn" onclick="next()"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+            <button class="btn" id="lastPageBtn"><svg viewBox="0 0 24 24"><path d="M5.59 7.41L11.18 12l-5.59 4.59L7 18l6-6-6-6zM16 6h2v12h-2z"/></svg></button>
+        </div>
+    </div>
+    <script>
+        // 變數將由 Python 腳本動態注入
+        const BOOK_TOTAL_PAGES = 24; 
+        const PAGE_RATIO = 0.9930; 
+        
+        // 根據 PDF 真實比例動態改變網頁框架
+        const baseHeight = 600;
+        const basePageWidth = baseHeight * PAGE_RATIO;
+        const baseBookWidth = basePageWidth * 2;
+
+        document.documentElement.style.setProperty('--book-height', `${baseHeight}px`);
+        document.documentElement.style.setProperty('--page-width', `${basePageWidth}px`);
+        document.documentElement.style.setProperty('--book-width', `${baseBookWidth}px`);
+
+        const bookEl = document.getElementById('book');
+        const bookContainer = document.getElementById('bookContainer');
+        const totalSheets = Math.ceil(BOOK_TOTAL_PAGES / 2);
+        let currentSheet = 0;
+
+        document.getElementById('lastPageBtn').onclick = () => jumpToPage(totalSheets);
+
+        function buildBook() {
+            bookEl.innerHTML = '';
+            for (let i = 0; i < totalSheets; i++) {
+                const sheet = document.createElement('div');
+                sheet.className = 'sheet';
+                const frontPageNum = 2 * i + 1;
+                const front = document.createElement('div');
+                front.className = 'page front';
+                if (frontPageNum <= BOOK_TOTAL_PAGES) {
+                    const img = document.createElement('img');
+                    img.src = `images/page_${frontPageNum}.png`;
+                    front.appendChild(img);
+                }
+                const backPageNum = 2 * i + 2;
+                const back = document.createElement('div');
+                back.className = 'page back';
+                if (backPageNum <= BOOK_TOTAL_PAGES) {
+                    const img = document.createElement('img');
+                    img.src = `images/page_${backPageNum}.png`;
+                    back.appendChild(img);
+                }
+                sheet.appendChild(front);
+                sheet.appendChild(back);
+                bookEl.appendChild(sheet);
+            }
+            responsiveScale();
+            updateBook();
+        }
+
+        function updateBook() {
+            const sheets = document.querySelectorAll('.sheet');
+            sheets.forEach((sheet, i) => {
+                if (i < currentSheet) { sheet.classList.add('flipped'); sheet.style.zIndex = i; }
+                else { sheet.classList.remove('flipped'); sheet.style.zIndex = totalSheets - i; }
+            });
+            if (currentSheet === 0) bookEl.style.transform = 'translateX(-25%)';
+            else if (currentSheet === totalSheets) bookEl.style.transform = 'translateX(25%)';
+            else bookEl.style.transform = 'translateX(0)';
+            updateControls();
+        }
+
+        function next() { if (currentSheet < totalSheets) { currentSheet++; updateBook(); } }
+        function prev() { if (currentSheet > 0) { currentSheet--; updateBook(); } }
+        function jumpToPage(idx) { if (idx >= 0 && idx <= totalSheets) { currentSheet = idx; updateBook(); } }
+        
+        function updateControls() {
+            const pi = document.getElementById('pageIndicator');
+            if (currentSheet === 0) pi.textContent = `1 / ${BOOK_TOTAL_PAGES}`;
+            else if (currentSheet === totalSheets) pi.textContent = `${BOOK_TOTAL_PAGES} / ${BOOK_TOTAL_PAGES}`;
+            else pi.textContent = `${currentSheet * 2}-${Math.min(currentSheet * 2 + 1, BOOK_TOTAL_PAGES)} / ${BOOK_TOTAL_PAGES}`;
+        }
+
+        function responsiveScale() {
+            const baseScale = Math.min((window.innerWidth - 60) / baseBookWidth, (window.innerHeight - 180) / baseHeight, 1);
+            bookContainer.style.transform = `scale(${baseScale})`;
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') next();
+            else if (e.key === 'ArrowLeft') prev();
+        });
+        window.addEventListener('resize', responsiveScale);
+        window.onload = buildBook;
+    </script>
+</body>
+</html>
